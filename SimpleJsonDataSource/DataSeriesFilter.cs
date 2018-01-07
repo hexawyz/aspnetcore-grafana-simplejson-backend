@@ -8,98 +8,75 @@ namespace SimpleJsonDataSource
 	{
 		public static IEnumerable<DataPoint<double>> FilterDataPoints(this IEnumerable<DataPoint<double>> dataPoints, DateTime startDateTime, DateTime endDateTime, TimeSpan samplingInterval, TimeSpan smoothingWindow)
 		{
-			var windows = Init(startDateTime, samplingInterval, smoothingWindow);
-			int windowIndex = 0;
+			if (smoothingWindow.Ticks <= 0) throw new ArgumentOutOfRangeException(nameof(smoothingWindow));
+			if (samplingInterval.Ticks <= 0) throw new ArgumentOutOfRangeException(nameof(samplingInterval));
 
-			DateTime nextWindowStartDateTime = windows[windows.Length - 1].StartDateTime + samplingInterval;
-			DateTime currentPointDateTime = startDateTime;
+			var duration = (endDateTime - startDateTime);
 
-			sbyte r;
+			if (duration.Ticks < 0) throw new ArgumentException();
+
+			var points = new(double Value, int Count)[checked((int)Math.Max(1, unchecked(duration.Ticks / samplingInterval.Ticks)))];
+
+			long halfWindowTicks = Math.Max(1, smoothingWindow.Ticks >> 1);
+
+			int firstPointIndex = 0;
+			DateTime firstPointDateTime = startDateTime;
 
 			foreach (var dataPoint in dataPoints)
 			{
-				while ((r = Aggregate(ref windows[windowIndex], dataPoint, endDateTime)) >= 0)
+				int pointIndex;
+				DateTime pointDateTime;
+
+				for (pointIndex = firstPointIndex, pointDateTime = firstPointDateTime; pointIndex < points.Length && pointDateTime < endDateTime; pointIndex++, pointDateTime += samplingInterval)
 				{
-					if (r > 0)
+					long distance = (dataPoint.DateTime - pointDateTime).Ticks;
+
+					if (distance < -halfWindowTicks)
 					{
-						yield return CreateDataPoint(currentPointDateTime, ref windows[windowIndex]);
-
-						ResetWindow(ref windows[windowIndex], ref nextWindowStartDateTime, samplingInterval);
-
-						if ((currentPointDateTime += samplingInterval) > endDateTime)
-						{
-							yield break;
-						}
+						break;
+					}
+					else if (distance > halfWindowTicks)
+					{
+						firstPointIndex = pointIndex + 1;
+						firstPointDateTime = pointDateTime + samplingInterval;
+						continue;
 					}
 
-					if (++windowIndex == windows.Length)
-					{
-						windowIndex = 0;
-					}
+					Aggregate(ref points[pointIndex], CosInterpolate(dataPoint.Value, (double)distance / halfWindowTicks));
 				}
+
+				if (firstPointIndex >= points.Length) break;
 			}
-			
-			while (currentPointDateTime <= endDateTime)
+
+			return GetDataPointEnumerable(points, startDateTime, samplingInterval);
+		}
+
+		private static IEnumerable<DataPoint<double>> GetDataPointEnumerable((double Value, int Count)[] points, DateTime startDateTime, TimeSpan samplingInterval)
+		{
+			int pointIndex;
+			DateTime pointDateTime;
+
+			for (pointIndex = 0, pointDateTime = startDateTime; pointIndex < points.Length; pointIndex++, pointDateTime += samplingInterval)
 			{
-				yield return CreateDataPoint(currentPointDateTime, ref windows[windowIndex]);
-
-				ResetWindow(ref windows[windowIndex], ref nextWindowStartDateTime, samplingInterval);
-
-				currentPointDateTime += samplingInterval;
-
-				if (++windowIndex == windows.Length)
-				{
-					windowIndex = 0;
-				}
+				yield return CreateDataPoint(ref points[pointIndex], pointDateTime);
 			}
 		}
 
-		private static void ResetWindow(ref (double Sum, int Count, DateTime StartDateTime, DateTime EndDateTime) window, ref DateTime nextWindowStartDateTime, TimeSpan samplingInterval)
+		private static DataPoint<double> CreateDataPoint(ref (double Value, int Count) point, DateTime dateTime)
+			=> new DataPoint<double>(dateTime, point.Count > 0 ? point.Value / point.Count : 0);
+
+		private static double LinearInterpolate(double value, double distance) => value * (1d - Math.Abs(distance));
+
+		private static double SquareInterpolate(double value, double distance) => value * (1d - Square(distance));
+
+		private static double Square(double v) => v * v;
+
+		private static double CosInterpolate(double value, double distance) => value * (0.5 * (Math.Cos(Math.PI * distance) + 1));
+
+		private static void Aggregate(ref (double Value, int Count) point, double value)
 		{
-			window.Sum = 0;
-			window.Count = 0;
-			window.StartDateTime = nextWindowStartDateTime;
-			window.EndDateTime = nextWindowStartDateTime += samplingInterval;
-		}
-
-		private static DataPoint<double> CreateDataPoint(DateTime dateTime, ref (double Sum, int Count, DateTime StartDateTime, DateTime EndDateTime) window)
-			=> new DataPoint<double>(dateTime, window.Count > 0 ? window.Sum / window.Count : 0);
-
-		private static sbyte Aggregate(ref (double Sum, int Count, DateTime StartDateTime, DateTime EndDateTime) window, DataPoint<double> dataPoint, DateTime endDateTime)
-		{
-			if (dataPoint.DateTime >= window.StartDateTime)
-			{
-				if (dataPoint.DateTime <= window.EndDateTime)
-				{
-					window.Sum += dataPoint.Value;
-					window.Count++;
-					return 0;
-				}
-				else
-				{
-					return 1;
-				}
-			}
-
-			return -1;
-		}
-
-		private static (double Sum, int Count, DateTime StartDateTime, DateTime EndDateTime)[] Init(DateTime startDateTime, TimeSpan samplingInterval, TimeSpan smoothingWindow)
-		{
-			var windowCount = Math.Max(smoothingWindow.Ticks / samplingInterval.Ticks, 1);
-
-			var windows = new(double Sum, int Count, DateTime StartDateTime, DateTime EndDateTime)[windowCount];
-			DateTime nextWindowStartDateTime = startDateTime.AddTicks(-(smoothingWindow.Ticks >> 1));
-
-			for (int i = 0; i < windows.Length; i++)
-			{
-				ref var window = ref windows[i];
-
-				window.StartDateTime = nextWindowStartDateTime;
-				window.EndDateTime = nextWindowStartDateTime += samplingInterval;
-			}
-
-			return windows;
+			point.Value += value;
+			point.Count++;
 		}
 	}
 }

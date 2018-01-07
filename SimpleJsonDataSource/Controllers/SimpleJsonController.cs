@@ -34,7 +34,15 @@ namespace SimpleJsonDataSource.Controllers
 			{
 				return BadRequest(ModelState);
 			}
-			
+
+			var smoothingWindow = TimeSpan.FromTicks(5 * TimeSpan.TicksPerMinute);
+			var halfSmoothingWindow = 0.5 * smoothingWindow;
+
+			var dataFrom = query.Range.From - halfSmoothingWindow;
+			var dataTo = query.Range.To + halfSmoothingWindow;
+
+			var samplingInterval = new TimeSpan(query.IntervalMs * TimeSpan.TicksPerMillisecond);
+
 			return Ok
 			(
 				query.Targets.Select
@@ -48,15 +56,10 @@ namespace SimpleJsonDataSource.Controllers
 					(
 						dsg =>
 						{
-							var halfWindow = TimeSpan.FromTicks(150 * TimeSpan.TicksPerSecond);
-
-							var from = query.Range.From - halfWindow;
-							var to = query.Range.To + halfWindow;
-
 							return new TimeSeriesViewModel<double>
 							(
 								dsg.Name,
-								DataSeriesFilter.FilterDataPoints(dsg.Repository.GetDataPoints(from, to), query.Range.From, query.Range.To, new TimeSpan(query.IntervalMs * TimeSpan.TicksPerMillisecond), new TimeSpan(TimeSpan.TicksPerMinute)).ToArray()
+								DataSeriesFilter.FilterDataPoints(dsg.Repository.GetDataPoints(dataFrom, dataTo), query.Range.From, query.Range.To, samplingInterval, smoothingWindow).ToArray()
 							);
 						}
 					).ToArray()

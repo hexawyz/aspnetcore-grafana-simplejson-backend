@@ -12,6 +12,7 @@ namespace SimpleJsonDataSource
 		private readonly Random _random;
 		private Timer _timer;
 		private TimeSpan _period;
+		private DateTime _nextDateTime;
 		private double _lastValue;
 
 		public InMemorySeriesGenerator(int seed, TimeSpan period)
@@ -26,12 +27,11 @@ namespace SimpleJsonDataSource
 
 		private void Init(DateTime now, TimeSpan duration)
 		{
-			var dateTime = now - duration;
+			_nextDateTime = now - duration;
 
-			while (dateTime <= now)
+			while (_nextDateTime <= now)
 			{
-				AddValue(dateTime);
-				dateTime += _period;
+				AddValue();
 			}
 		}
 
@@ -42,8 +42,20 @@ namespace SimpleJsonDataSource
 
 		private void Tick(object state)
 		{
-			AddValue(DateTime.UtcNow);
+			var now = DateTime.UtcNow;
+
+			while (_nextDateTime < now)
+			{
+				AddValue();
+			}
+
 			_timer.Change(_period, Timeout.InfiniteTimeSpan);
+		}
+
+		private void AddValue()
+		{
+			AddValue(_nextDateTime);
+			_nextDateTime += _period;
 		}
 
 		private void AddValue(DateTime dateTime)
