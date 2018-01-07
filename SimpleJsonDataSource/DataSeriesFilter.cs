@@ -15,7 +15,7 @@ namespace SimpleJsonDataSource
 
 			if (duration.Ticks < 0) throw new ArgumentException();
 
-			var points = new(double Value, int Count)[checked((int)Math.Max(1, unchecked(duration.Ticks / samplingInterval.Ticks)))];
+			var points = new(double Value, double Count)[checked((int)Math.Max(1, unchecked(duration.Ticks / samplingInterval.Ticks)))];
 
 			long halfWindowTicks = Math.Max(1, smoothingWindow.Ticks >> 1);
 
@@ -42,7 +42,9 @@ namespace SimpleJsonDataSource
 						continue;
 					}
 
-					Aggregate(ref points[pointIndex], CosInterpolate(dataPoint.Value, (double)distance / halfWindowTicks));
+					double d = (double)distance / halfWindowTicks;
+
+					Aggregate(ref points[pointIndex], LinearInterpolate(dataPoint.Value, d), d);
 				}
 
 				if (firstPointIndex >= points.Length) break;
@@ -51,7 +53,7 @@ namespace SimpleJsonDataSource
 			return GetDataPointEnumerable(points, startDateTime, samplingInterval);
 		}
 
-		private static IEnumerable<DataPoint<double>> GetDataPointEnumerable((double Value, int Count)[] points, DateTime startDateTime, TimeSpan samplingInterval)
+		private static IEnumerable<DataPoint<double>> GetDataPointEnumerable((double Value, double Count)[] points, DateTime startDateTime, TimeSpan samplingInterval)
 		{
 			int pointIndex;
 			DateTime pointDateTime;
@@ -62,21 +64,15 @@ namespace SimpleJsonDataSource
 			}
 		}
 
-		private static DataPoint<double> CreateDataPoint(ref (double Value, int Count) point, DateTime dateTime)
+		private static DataPoint<double> CreateDataPoint(ref (double Value, double Count) point, DateTime dateTime)
 			=> new DataPoint<double>(dateTime, point.Count > 0 ? point.Value / point.Count : 0);
 
 		private static double LinearInterpolate(double value, double distance) => value * (1d - Math.Abs(distance));
-
-		private static double SquareInterpolate(double value, double distance) => value * (1d - Square(distance));
-
-		private static double Square(double v) => v * v;
-
-		private static double CosInterpolate(double value, double distance) => value * (0.5 * (Math.Cos(Math.PI * distance) + 1));
-
-		private static void Aggregate(ref (double Value, int Count) point, double value)
+		
+		private static void Aggregate(ref (double Value, double Count) point, double value, double distance)
 		{
 			point.Value += value;
-			point.Count++;
+			point.Count += 1d - Math.Abs(distance);
 		}
 	}
 }
